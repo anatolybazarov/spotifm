@@ -1,3 +1,10 @@
+> ⚠️ *spotify has no longer allows third party login via credentials, so this project is **non-functional** until further notice* ⚠️
+
+> ⚠️ *spotify has no longer allows third party login via credentials, so this project is **non-functional** until further notice* ⚠️
+
+> ⚠️ *spotify has no longer allows third party login via credentials, so this project is **non-functional** until further notice* ⚠️
+
+
 # spotifm (2.0.0)
 
 spotifm streams your spotify music over the internet using icecast2 and spawns a rest api
