@@ -1,8 +1,8 @@
-> ⚠️ *spotify has no longer allows third party login via credentials, so this project is **non-functional** until further notice* ⚠️
+> ⚠️ *spotify no longer allows third-party logins via credentials* ⚠️
 
-> ⚠️ *spotify has no longer allows third party login via credentials, so this project is **non-functional** until further notice* ⚠️
+> ⚠️ *this project is **non-functional** until further notice* ⚠️
 
-> ⚠️ *spotify has no longer allows third party login via credentials, so this project is **non-functional** until further notice* ⚠️
+> create an issue if you want to see this project's functionality restored via access token logins, as otherwise it will remain low on my priority list
 
 
 # spotifm (2.0.0)
