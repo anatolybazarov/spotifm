@@ -224,28 +224,21 @@ pub fn populate(uris: Vec<String>, session: Arc<Mutex<Session>>, db: SpotifyData
                         tracks.push(spotify_id);
                     }
                     "artist" => {
-                        let list = Artist::get(&session, spotify_id).await.unwrap();
-                        tracks = list
-                            .top_tracks
-                            .iter()
-                            .map(|x| x.clone())
-                            .collect::<Vec<SpotifyId>>();
+                        let list = Artist::get(&session, &spotify_id).await.unwrap();
+                        tracks = list.top_tracks[0].tracks.0.clone();
                     }
-                    "album" => {
-                        let list = Album::get(&session, spotify_id).await.unwrap();
-                        tracks = list
-                            .tracks
-                            .iter()
-                            .map(|x| x.clone())
-                            .collect::<Vec<SpotifyId>>();
-                    }
+                    // "album" => {
+                    //     let list = Album::get(&session, &spotify_id).await.unwrap();
+                    //     tracks = list.a
+                    // }
                     "playlist" => {
-                        let list = Playlist::get(&session, spotify_id).await.unwrap();
+                        let list = Playlist::get(&session, &spotify_id).await.unwrap();
                         tracks = list
-                            .tracks
+                            .contents
+                            .items
                             .iter()
-                            .map(|x| x.clone())
-                            .collect::<Vec<SpotifyId>>();
+                            .map(|item| item.id.clone())
+                            .collect();
                     }
                     _ => {
                         panic!("Malformed Spotify URI")
@@ -257,12 +250,12 @@ pub fn populate(uris: Vec<String>, session: Arc<Mutex<Session>>, db: SpotifyData
                     let mut track =
                         SpotifyTrack::new(track_id.to_base62().unwrap(), "".to_string(), Vec::new());
 
-                    match Track::get(&session, track_id).await {
+                    match Track::get(&session, &track_id).await {
                         Err(_) => {}
                         Ok(track_info) => {
                             track.track = track_info.name;
-                            for id in track_info.artists {
-                                match Artist::get(&session, id).await {
+                            for artist in track_info.artists.0 {
+                                match Artist::get(&session, &artist.id).await {
                                     Err(_) => {}
                                     Ok(artist) => track.artists.push(artist.name),
                                 }

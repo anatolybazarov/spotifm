@@ -1,6 +1,6 @@
 [package]
 name = "spotifm"
-version = "2.0.0"
+version = "2.1.0"
 authors = ["waveplate"]
 license = "GPL"
 description = "stream spotify via icecast"
@@ -8,6 +8,7 @@ keywords = ["spotify"]
 repository = "https://github.com/waveplate/spotifm"
 readme = "README.md"
 edition = "2021"
+rust-version = "1.81"
 
 [workspace]
 
@@ -17,6 +18,12 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
+librespot = { git = "https://github.com/librespot-org/librespot", tag = "v0.6.0", features = [
+    "alsa-backend",
+    "portaudio-backend", 
+    "pulseaudio-backend",
+] }
+librespot-oauth = "0.6.0"
 tokio = { version = "1", features = ["macros", "signal", "sync", "process"] }
 signal-hook = "*"
 rustbreak = { version = "2.0.0", features = ["ron_enc"] }
@@ -29,12 +36,18 @@ env_logger = "0.7.1"
 chrono = "*"
 iconv = "*"
 rand = "*"
-
-[dependencies.librespot]
-version = "0.4.1"
-features = ["pulseaudio-backend"]
+data-encoding = "2.5"
+futures-util = { version = "0.3", default-features = false }
+getopts = "0.2"
+log = "0.4"
+sha1 = "0.10"
+sysinfo = { version = "0.33.0", default-features = false, features = ["system"] }
+thiserror = "2.0"
+url = "2.2"
+oauth2 = "4.4"
+rustls = { version = "0.23.23", features = ["ring"] }
 
 [dependencies.rspotify]
-version = "0.11.5"
+version = "0.13.3"
 default-features = false
 features = ["client-ureq", "ureq-rustls-tls"]

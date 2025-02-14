@@ -7,8 +7,9 @@ use actix_web::{
 };
 use std::sync::{Arc, Mutex};
 use chrono::{Duration as ChronoDuration, Utc};
-use librespot::core::{keymaster, session::Session, spotify_id::SpotifyId};
+use librespot::core::{session::Session, spotify_id::SpotifyId, token};
 use librespot::playback::player::PlayerEvent;
+use librespot_oauth::OAuthToken;
 use rspotify::{
     model::{SearchResult, SearchType, TrackId},
     prelude::*,
@@ -18,6 +19,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::FromIterator;
 use std::{sync::mpsc::SyncSender, thread};
+use std::time::Instant;
 
 use crate::db::{SpotifyDatabase, SpotifyTrack};
 use crate::config::SpotifmConfig;
@@ -170,7 +172,7 @@ pub async fn get_announce(
 pub async fn search(
     req: HttpRequest,
     path: Path<(String, u32)>,
-    session: Data<Arc<Mutex<Session>>>,
+    token: Data<Arc<Mutex<OAuthToken>>>,
 ) -> HttpResponse {
     let query = web::Query::<HashMap<String, String>>::from_query(req.query_string()).unwrap();
     let search_type = match path.0 .0.to_string().to_lowercase().as_str() {
@@ -181,7 +183,7 @@ pub async fn search(
         _ => SearchType::Track,
     };
 
-    return match api(session).await {
+    return match api(token).await {
         Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err)])),
         Ok(spotify) => {
             return match spotify.search(
@@ -239,7 +241,7 @@ pub async fn skip(data: Data<SyncSender<PlayerEvent>>, db: Data<SpotifyDatabase>
     let next_playing = db.next_track().unwrap();
     return match data.send(PlayerEvent::Stopped {
         play_request_id: 0,
-        track_id: SpotifyId::from_base62("0").unwrap(),
+        track_id: SpotifyId::from_base62("6iWMts53pyqgw0DpIEmnqN").unwrap(),
     }) {
         Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.to_string())])),
         Ok(_) => {
@@ -260,7 +262,7 @@ pub async fn shuffle(db: Data<SpotifyDatabase>) -> HttpResponse {
 pub async fn queue(
     path: Path<String>,
     data: Data<SyncSender<PlayerEvent>>,
-    session: Data<Arc<Mutex<Session>>>,
+    token: Data<Arc<Mutex<OAuthToken>>>,
     db: Data<SpotifyDatabase>,
 ) -> HttpResponse {
     let now_playing = db.current_track().unwrap();
@@ -272,10 +274,10 @@ pub async fn queue(
         return HttpResponse::Ok().json(next_playing);
     }
 
-    return match api(session).await {
+    return match api(token).await {
         Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.unwrap().to_string())])),
         Ok(spotify) => {
-            return match spotify.track(TrackId::from_id(path.0).unwrap()) {
+            return match spotify.track(TrackId::from_id(path.0).unwrap(), None) {
                 Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.to_string())])),
                 Ok(track) => {
                     let spotify_track = SpotifyTrack::new(
@@ -296,9 +298,8 @@ pub async fn queue(
                             HttpResponse::Ok().json(HashMap::from([("error", err.to_string())]))
                         }
                         Ok(_) => {
-                            return match data.send(PlayerEvent::Changed {
-                                old_track_id: now_playing.spotify_id(),
-                                new_track_id: spotify_track.spotify_id(),
+                            return match data.send(PlayerEvent::PlayRequestIdChanged {
+                                play_request_id: spotify_track.spotify_id().id as u64
                             }) {
                                 Err(err) => HttpResponse::Ok()
                                     .json(HashMap::from([("error", err.to_string())])),
@@ -318,7 +319,7 @@ pub async fn queue(
 pub async fn play(
     path: Path<String>,
     data: Data<SyncSender<PlayerEvent>>,
-    session: Data<Arc<Mutex<Session>>>,
+    token: Data<Arc<Mutex<OAuthToken>>>,
     db: Data<SpotifyDatabase>,
 ) -> HttpResponse {
     let now_playing = db.current_track().unwrap();
@@ -330,10 +331,10 @@ pub async fn play(
         return HttpResponse::Ok().json(next_playing);
     }
 
-    return match api(session).await {
+    return match api(token).await {
         Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.unwrap().to_string())])),
         Ok(spotify) => {
-            return match spotify.track(TrackId::from_id(path.0).unwrap()) {
+            return match spotify.track(TrackId::from_id(path.0).unwrap(), None) {
                 Err(err) => HttpResponse::Ok().json(HashMap::from([("error", err.to_string())])),
                 Ok(track) => {
                     let spotify_track = SpotifyTrack::new(
@@ -354,9 +355,8 @@ pub async fn play(
                             HttpResponse::Ok().json(HashMap::from([("error", err.to_string())]))
                         }
                         Ok(_) => {
-                            return match data.send(PlayerEvent::Changed {
-                                old_track_id: now_playing.spotify_id(),
-                                new_track_id: spotify_track.spotify_id(),
+                            return match data.send(PlayerEvent::PlayRequestIdChanged {
+                                play_request_id: spotify_track.spotify_id().id as u64
                             }) {
                                 Err(err) => HttpResponse::Ok()
                                     .json(HashMap::from([("error", err.to_string())])),
@@ -387,31 +387,45 @@ pub async fn show_playlist(db: Data<SpotifyDatabase>) -> HttpResponse {
     };
 }
 
-async fn api(session: Data<Arc<Mutex<Session>>>) -> Result<AuthCodeSpotify, Option<String>> {
-    return match keymaster::get_token(&session.lock().unwrap(), CLIENT_ID, SCOPES).await {
-        Err(_) => Err(Some("could not get token".to_string())),
-        Ok(search_token) => {
-            let token = rspotify::Token {
-                access_token: search_token.access_token.clone(),
-                expires_in: ChronoDuration::seconds(search_token.expires_in.into()),
-                expires_at: Some(
-                    Utc::now() + ChronoDuration::seconds(search_token.expires_in.into()),
-                ),
-                refresh_token: None,
-                scopes: HashSet::from_iter(SCOPES.split(",").into_iter().map(|x| x.to_string())),
-            };
-
-            let mut spotify = rspotify::AuthCodeSpotify::from_token(token.clone());
-
-            spotify.creds.id = CLIENT_ID.to_string();
-
-            Ok(spotify)
-        }
+async fn api(token: Data<Arc<Mutex<OAuthToken>>>) -> Result<AuthCodeSpotify, Option<String>> {
+    let access_token = token.lock().unwrap();
+    let token = rspotify::Token {
+        access_token: access_token.access_token.clone(),
+        expires_in: ChronoDuration::from_std(access_token.expires_at.duration_since(Instant::now())).unwrap(),
+        expires_at: Some(Utc::now() + ChronoDuration::from_std(access_token.expires_at.duration_since(Instant::now())).unwrap()),
+        refresh_token: None,
+        scopes: HashSet::from_iter(SCOPES.split(",").into_iter().map(|x| x.to_string())),
     };
+
+    let mut spotify = rspotify::AuthCodeSpotify::from_token(token.clone());
+
+    spotify.creds.id = CLIENT_ID.to_string();
+
+    return Ok(spotify);
+    // return match keymaster::get_token(&session.lock().unwrap(), CLIENT_ID, SCOPES).await {
+    //     Err(_) => Err(Some("could not get token".to_string())),
+    //     Ok(search_token) => {
+    //         let token = rspotify::Token {
+    //             access_token: search_token.access_token.clone(),
+    //             expires_in: ChronoDuration::seconds(search_token.expires_in.into()),
+    //             expires_at: Some(
+    //                 Utc::now() + ChronoDuration::seconds(search_token.expires_in.into()),
+    //             ),
+    //             refresh_token: None,
+    //             scopes: HashSet::from_iter(SCOPES.split(",").into_iter().map(|x| x.to_string())),
+    //         };
+
+    //         let mut spotify = rspotify::AuthCodeSpotify::from_token(token.clone());
+
+    //         spotify.creds.id = CLIENT_ID.to_string();
+
+    //         Ok(spotify)
+    //     }
+    // };
 }
 
 #[actix_rt::main]
-pub async fn start(tx: SyncSender<PlayerEvent>, config: Arc<Mutex<SpotifmConfig>>, session: Arc<Mutex<Session>>, db: SpotifyDatabase) {
+pub async fn start(tx: SyncSender<PlayerEvent>, config: Arc<Mutex<SpotifmConfig>>, session: Arc<Mutex<Session>>, db: SpotifyDatabase, token: Arc<Mutex<OAuthToken>>) {
     thread::spawn(move || {
         //let session = session.lock().unwrap().clone();
         match rt::System::new("rest-api").block_on(
@@ -420,12 +434,14 @@ pub async fn start(tx: SyncSender<PlayerEvent>, config: Arc<Mutex<SpotifmConfig>
                 let config = web::Data::new(config.clone());
                 let session = web::Data::new(session.clone());
                 let db = web::Data::new(db.clone());
+                let token = web::Data::new(token.clone());
                 App::new()
                     .wrap(middleware::Logger::default())
                     .app_data(tx)
                     .app_data(config)
                     .app_data(session)
                     .app_data(db)
+                    .app_data(token)
                     .service(np)
                     .service(prev_track)
                     .service(next_track)
